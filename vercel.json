@@ -1,9 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/proxy?path=:path*" },
-    { "source": "/css/:path*", "destination": "/frontend/css/:path*" },
-    { "source": "/js/:path*", "destination": "/frontend/js/:path*" },
-    { "source": "/images/:path*", "destination": "/frontend/images/:path*" },
-    { "source": "/", "destination": "/frontend/index.html" }
-  ]
-}
