@@ -10,6 +10,7 @@ const CACHE_TTL = Infinity; // results are final; never evict
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
 export function saveCache(year, subEventId, participants) {
+  if (!participants?.length) return; // never cache empty results — a transient fetch failure must not poison the cache permanently
   try {
     localStorage.setItem(`race_${year}_${subEventId}`, JSON.stringify({
       ts: Date.now(),
@@ -25,6 +26,7 @@ export function loadCache(year, subEventId) {
     if (!raw) return null;
     const { ts, participants } = JSON.parse(raw);
     if (Date.now() - ts > CACHE_TTL) { localStorage.removeItem(key); return null; }
+    if (!participants?.length) { localStorage.removeItem(key); return null; } // discard poisoned empty entries from older versions
     return participants;
   } catch { return null; }
 }
