@@ -31,9 +31,9 @@ No npm packages, no build step — just the platform plus Bootstrap for styling.
 | **Frontend** | Vanilla HTML + ES module JavaScript |
 | **CSS** | [Bootstrap 5.3](https://getbootstrap.com/) (CDN) + small custom overrides for the brand accent colour |
 | **API** | RaceRoster v2 REST API (`results.raceroster.com`) |
-| **Proxy** | Local Node server forwards `/api/*` to RaceRoster to avoid CORS |
+| **Proxy** | Forwards `/api/*` to RaceRoster to avoid CORS — two implementations, see [Deployment](#deployment) |
 | **Caching** | Browser `localStorage` (permanent, namespaced by year + race ID) |
-| **Deployment** | Docker (single-stage Alpine image) |
+| **Deployment** | Vercel (serverless function) for hosting; Docker/local Node for dev |
 
 ## Features
 
@@ -56,9 +56,12 @@ No npm packages, no build step — just the platform plus Bootstrap for styling.
 
 ```
 ├── backend/
-│   └── server.js              # Static file server + HTTPS proxy to results.raceroster.com
+│   └── server.js              # Local dev: static file server + HTTPS proxy to results.raceroster.com
 └── frontend/
     ├── index.html
+    ├── vercel.json            # Vercel: rewrites /api/* to the proxy function
+    ├── api/
+    │   └── proxy.js           # Vercel: serverless proxy to results.raceroster.com
     ├── css/styles.css
     └── js/
         ├── app.js             # Bootstrap, event wiring, load orchestration
@@ -115,6 +118,19 @@ node backend/server.js
 ```
 
 Open [http://localhost:3001](http://localhost:3001).
+
+## Deployment
+
+The app is hosted on **Vercel**, but there are **two copies of the same proxy** — one per environment. Both do the identical job (forward `/api/*` to `results.raceroster.com` with a browser `User-Agent` to dodge CORS and UA filtering); they just run in different places.
+
+| Environment | Static files | Proxy | Entry point |
+|---|---|---|---|
+| **Vercel** (production) | Served from `frontend/` | `frontend/api/proxy.js` (serverless function), routed via `frontend/vercel.json` | push to `main` auto-deploys |
+| **Local / Docker** (dev) | Served by `backend/server.js` | `backend/server.js` (same file, built-in `/api/*` proxy) | `node backend/server.js` |
+
+The frontend calls `/api/...` unchanged in both — each environment resolves that path to its own proxy.
+
+> **Vercel note:** the project's **Root Directory is `frontend`**, so everything Vercel deploys must live inside `frontend/`. That's why `api/` and `vercel.json` sit there rather than at the repo root — files at the repo root are outside the deploy scope and silently ignored.
 
 ## Running with Docker
 
