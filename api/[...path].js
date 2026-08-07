@@ -1,6 +1,11 @@
 module.exports = async function handler(req, res) {
   const segments = [].concat(req.query.path || []);
-  const qs = req.url.split("?")[1] || "";
+  const params = new URLSearchParams();
+  for (const [key, val] of Object.entries(req.query)) {
+    if (key === "path") continue;
+    for (const v of [].concat(val)) params.append(key, v);
+  }
+  const qs = params.toString();
 
   try {
     const upstream = await fetch(

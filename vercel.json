@@ -1,5 +1,8 @@
 {
-  "framework": null,
-  "buildCommand": null,
-  "outputDirectory": "frontend"
+  "rewrites": [
+    { "source": "/css/:path*", "destination": "/frontend/css/:path*" },
+    { "source": "/js/:path*", "destination": "/frontend/js/:path*" },
+    { "source": "/images/:path*", "destination": "/frontend/images/:path*" },
+    { "source": "/", "destination": "/frontend/index.html" }
+  ]
 }
