@@ -1,8 +1,11 @@
 {
-  "rewrites": [
-    { "source": "/css/:path*", "destination": "/frontend/css/:path*" },
-    { "source": "/js/:path*", "destination": "/frontend/js/:path*" },
-    { "source": "/images/:path*", "destination": "/frontend/images/:path*" },
-    { "source": "/", "destination": "/frontend/index.html" }
+  "builds": [
+    { "src": "api/proxy.js", "use": "@vercel/node" },
+    { "src": "frontend/**", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/proxy.js?path=$1" },
+    { "src": "/", "dest": "/frontend/index.html" },
+    { "src": "/(.*)", "dest": "/frontend/$1" }
   ]
 }
