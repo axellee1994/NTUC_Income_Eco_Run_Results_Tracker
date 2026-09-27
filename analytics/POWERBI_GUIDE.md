@@ -30,8 +30,8 @@ Each step has a **Goal**, a **Question** to work out yourself, a **Hint**, and a
 
 ## Stage 1: Import and Power Query (2–3 h)
 
-### 1.1 Load the three CSVs
-**Goal:** `results`, `all_participants` and `repeat_runners` appear as tables in the Data pane.
+### 1.1 Load two CSVs
+**Goal:** `results` and `repeat_runners` appear as tables in the Data pane. Don't import `all_participants.csv`; it was only needed for the duplicate-name check in Python.
 
 **Question:** Power BI offers **Load** and **Transform Data** when you import a file. Which one lets you check the column types before anything is loaded, and why does that matter for `bib`?
 
@@ -52,20 +52,21 @@ Use **Get Data → Text/CSV → Transform Data**. This opens Power Query, where 
 | Table | Whole Number | Text | True/False |
 |---|---|---|---|
 | results | year, race_id, chip_time_sec | race, participant_id, name, name_key, bib, chip_time, race_status | – |
-| all_participants | year, race_id | race_name, participant_id, name, name_key | – |
 | repeat_runners | year_from, year_to, time_from_sec, time_to_sec, delta_sec | name_key, race_from, race_to | same_race |
 
 A blank `chip_time_sec` stays **null**. Don't replace it with 0, because a 0 would drag down every average and median.
 </details>
 
-### 1.3 Add a time-in-minutes column
-**Goal:** a `chip_time_min` column in `results` for the histogram in Stage 4.
+### 1.3 Add time-in-minutes columns
+**Goal:** a `chip_time_min` column in `results` and a `delta_min` column in `repeat_runners`, for the histograms in Stage 4.
 
 **Question:** should this be a Power Query column or a DAX measure? What is the difference between a value calculated per row and a value calculated per visual?
 
 <details><summary>Answer</summary>
 
 Use a Power Query column: **Add Column → Custom Column**, `[chip_time_sec] / 60`, type Decimal Number. It is a fixed value per row, which is what a histogram axis needs. A measure is recalculated per visual (for example, a median for whatever is filtered) and can't go on an axis as a per-runner value.
+
+Do the same in `repeat_runners`: `delta_min` = `[delta_sec] / 60`, Decimal Number. Blank `delta_sec` values stay blank.
 </details>
 
 ---
@@ -75,7 +76,7 @@ Use a Power Query column: **Add Column → Custom Column**, `[chip_time_sec] / 6
 ### 2.1 Build a race dimension
 **Goal:** a small `DimRace` table with one row per race.
 
-**Question:** the CSV has race names but no distances. Pace per km needs a distance. Where should that fact live: in `results` (repeated on 17,000 rows) or in a 6-row table? What else belongs in that table?
+**Question:** the CSV has race names but no distances. Pace per km needs a distance. Where should that fact live: in `results` (repeated on about 16,000 rows) or in a 6-row table? What else belongs in that table?
 
 **Hint:** think about sort order. Alphabetically, "10km" sorts before "3km".
 
@@ -123,7 +124,7 @@ Then select `DimRace[race]` → **Column tools → Sort by column → race_order
 | DimRace[race] | repeat_runners[race_to] | yes |
 | DimYear[year] | repeat_runners[year_to] | yes |
 
-Link `repeat_runners` on the `_to` side, so a year slicer means "runners who came back in year X". Leave `all_participants` unconnected; it was only needed for the duplicate-name check in Python.
+Link `repeat_runners` on the `_to` side, so a year slicer means "runners who came back in year X".
 
 Interview point: "two facts sharing conformed dimensions" is standard star-schema vocabulary.
 </details>
@@ -184,18 +185,21 @@ Use the same pattern for `Fastest Time (sec)` with `MIN`. Step 3.7 adds one more
 
 ```DAX
 Median Time =
-VAR TotalSeconds = [Median Time (sec)]
+VAR RawSeconds = [Median Time (sec)]
+VAR TotalSeconds = ROUND(RawSeconds, 0)
 VAR Hours = INT(TotalSeconds / 3600)
 VAR Minutes = INT(MOD(TotalSeconds, 3600) / 60)
 VAR Seconds = MOD(TotalSeconds, 60)
 RETURN
     IF(
-        ISBLANK(TotalSeconds),
+        ISBLANK(RawSeconds),
         BLANK(),
         Hours & ":" & FORMAT(Minutes, "00") & ":" & FORMAT(Seconds, "00")
     )
 ```
 It returns text, and charts need numbers. On charts, plot `Median Time (sec) / 60` as minutes.
+
+Why `ROUND`: the median of an even number of runners is the average of the middle two, so it can end in .5. Without rounding, 59.5 seconds formats as "60" and you get `2:16:60`. The blank check uses the raw value, so a blank median is never turned into `0:00:00`.
 </details>
 
 ### 3.4 Pace per km
@@ -209,7 +213,22 @@ It returns text, and charts need numbers. On charts, plot `Median Time (sec) / 6
 Median Pace (sec/km) =
 DIVIDE([Median Time (sec)], SELECTEDVALUE(DimRace[distance_km]))
 ```
-`SELECTEDVALUE` returns blank when more than one race is in context, so a total row shows blank instead of a meaningless mixed pace. `DIVIDE` handles divide-by-zero. The display version follows the same pattern as 3.3, with minutes and seconds only.
+`SELECTEDVALUE` returns blank when more than one race is in context, so a total row shows blank instead of a meaningless mixed pace. `DIVIDE` handles divide-by-zero.
+
+The display version follows 3.3, with minutes and seconds only. Pace is almost never a whole number of seconds, so the `ROUND` matters even more here:
+```DAX
+Median Pace =
+VAR RawSeconds = [Median Pace (sec/km)]
+VAR PaceSeconds = ROUND(RawSeconds, 0)
+VAR Minutes = INT(PaceSeconds / 60)
+VAR Seconds = MOD(PaceSeconds, 60)
+RETURN
+    IF(
+        ISBLANK(RawSeconds),
+        BLANK(),
+        Minutes & ":" & FORMAT(Seconds, "00") & " /km"
+    )
+```
 </details>
 
 ### 3.5 Year-on-year growth
@@ -310,6 +329,29 @@ DIVIDE(
 Median Change (sec) =
 CALCULATE(MEDIAN(repeat_runners[delta_sec]), DimRace[has_real_times] = TRUE())
 ```
+To show the median change on a card, format the size of the change and say which direction it went:
+```DAX
+Median Change =
+VAR RawSeconds = [Median Change (sec)]
+VAR ChangeSeconds = ROUND(ABS(RawSeconds), 0)
+VAR Minutes = INT(ChangeSeconds / 60)
+VAR Seconds = MOD(ChangeSeconds, 60)
+VAR Direction =
+    SWITCH(
+        TRUE(),
+        RawSeconds < 0, " faster",
+        RawSeconds > 0, " slower",
+        ""
+    )
+RETURN
+    IF(
+        ISBLANK(RawSeconds),
+        BLANK(),
+        Minutes & ":" & FORMAT(Seconds, "00") & Direction
+    )
+```
+Why `ABS`: DAX's `INT` rounds down and `MOD` takes the sign of the divisor, so −95 seconds would become `INT(-95/60) = -2` and `MOD(-95, 60) = 25`, which displays as "-2:25" instead of "1:35 faster".
+
 The denominator is only the rows with a `delta_sec`: same race, both years timed. Dividing by all returners would understate improvement. The `has_real_times` filter removes 74 kids whose "change" comes from placeholder times (1:00:00 in 2024 → 7:00 in 2025 isn't a real 53-minute improvement).
 </details>
 
@@ -352,10 +394,10 @@ Create a new page and drag `DimRace[race]` into **Drill through** in the Visuali
 
 <details><summary>Suggested layout</summary>
 
-- Cards: Returners, % Improved, Median Change (as m:ss).
-- Matrix: `race_from` rows × `race_to` columns, `Returners` as the value. This shows upgrades such as 10km → 21.1km.
-- Histogram of `delta_sec / 60` for same-race returners.
-- Caption: "Linked by exact unique name; see Methodology".
+- Cards: Returners, % Improved, Median Change (the display measure from 3.8).
+- Matrix: `repeat_runners[race_from]` as rows, `DimRace[race]` as columns, `Returners` as the value. `race_to` is hidden (2.4), but the relationship makes `DimRace[race]` mean the race they came back to. This shows upgrades such as 10km → 21.1km. The rows sort alphabetically ("10km" before "21.1km") because `race_from` is plain text; that's fine for a first version.
+- Histogram: right-click `delta_min` → **New group** → bin size 1, then a column chart of the bins against `Returners`. Filter the visual to `DimRace[has_real_times] = TRUE`, so the kids' placeholder changes don't appear.
+- Caption: "Linked by unique name (word order ignored); see Methodology".
 </details>
 
 ### Tooltip page
@@ -371,7 +413,7 @@ Create a new page. In **Format → Page information**, turn **Allow use as toolt
 
 <details><summary>Suggested content</summary>
 
-- Pipeline: RaceRoster public API → Python notebook (cached, rate-limited, completeness-checked) → 3 CSVs → Power BI star schema.
+- Pipeline: RaceRoster public API → Python notebook (cached, rate-limited, completeness-checked) → CSVs → Power BI star schema.
 - Completeness: every race matches RaceRoster's official count, apart from results RaceRoster hides (see Data facts).
 - Limitations: no gender or age data from the API; name-based repeat-runner matching ignores word order, because 2025 lists names first-name-first (two different people with the same unique name can still be merged); unnamed participants excluded from matching; placeholder kids' times excluded from time measures.
 </details>
@@ -382,8 +424,10 @@ Create a new page. In **Format → Page information**, turn **Allow use as toolt
 
 1. **View → Themes → Customize current theme**: pick 2–3 colours and use them everywhere.
 2. Give every visual a title that states a finding, not just "Participants by race".
-3. **File → Export → Export to PDF** as a backup viewable without Power BI. Publishing to the web needs a work or school account.
-4. Commit `EcoRun.pbix` and 3–4 screenshots to the repo, and add a short "Power BI report" section to the README.
+3. **File → Export → Export to PDF** as a backup viewable without Power BI.
+4. **Optional, Publish to web** (needs a work or school account that allows it): **Home → Publish** to the Power BI Service, then in the Service **File → Embed report → Publish to web (public)**.
+   - **Privacy:** Publish to web makes the report public. Anyone with the link can open it without signing in, and search engines can find it. The report contains about 15,000 real runner names. Before publishing, remove `name` from every visual (the drill-through table can show bib, time and place instead). Keep names only in the `.pbix` and screenshots you control.
+5. Commit `EcoRun.pbix` and 3–4 screenshots to the repo, and add a short "Power BI report" section to the README.
 
 ### Interview questions to be ready for
 - Why a star schema instead of one flat table?
